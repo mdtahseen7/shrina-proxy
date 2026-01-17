@@ -289,17 +289,10 @@ async function streamProxyRequest(req: Request, res: Response, url: string, head
         // Fall through to buffer-based approach on error
       }
     } 
-    // Case 3: Compressed content that doesn't need special processing
-    else if (isCompressed) {
-      // For compressed content that doesn't need special processing,
-      // we can't stream it directly as the client expects uncompressed
-      const arrayBuffer = await response.arrayBuffer();
-      const buffer = await decompressWithWorker(Buffer.from(arrayBuffer), contentEncoding);
-      
-      res.removeHeader('content-encoding');
-      recordResponse(requestStartTime, true, arrayBuffer.byteLength, buffer.length);
-      return res.send(buffer);
-    } 
+    /* 
+    // Case 3: RE MOVED - Direct streaming is better for performance
+    // compressed content without special processing will fall through to Case 4
+    */
     // Case 4: Uncompressed content that doesn't need special processing - direct streaming
     else if (response.body) {
       // Set X-Accel-Buffering header to disable nginx buffering
