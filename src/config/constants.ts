@@ -13,7 +13,7 @@ dotenv.config({ path: path.resolve(process.cwd(), '.env') });
  * Server configuration
  */
 export const SERVER = {
-  PORT: parseInt(process.env.PORT || '8000', 10),
+  PORT: parseInt(process.env.PORT || '3000', 10),
   HOST: process.env.HOST || 'localhost',
   NODE_ENV: process.env.NODE_ENV || 'development',
   IS_PRODUCTION: process.env.NODE_ENV === 'production',
