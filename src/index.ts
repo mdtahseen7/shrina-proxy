@@ -5,7 +5,7 @@ import { SERVER } from './config/constants.js';
 import { logger } from './middleware.js';
 
 // Get port from environment
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 8000;
 const USE_CLOUDFLARE = process.env.USE_CLOUDFLARE === 'true';
 
 // Create regular HTTP server since Cloudflare will handle HTTP/2
