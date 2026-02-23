@@ -290,107 +290,132 @@ async function streamProxyRequest(req: Request, res: Response, url: string, head
       }
     } 
     /* 
-    // Case 3: RE MOVED - Direct streaming is better for performance
+    // Case 3: REMOVED - Direct streaming is better for performance
     // compressed content without special processing will fall through to Case 4
     */
-    // Case 4: Uncompressed content that doesn't need special processing - direct streaming
+    // Case 4: Content that doesn't need special processing
     else if (response.body) {
       // Set X-Accel-Buffering header to disable nginx buffering
       res.setHeader('X-Accel-Buffering', 'no');
       
-      // Handle direct streaming in a Node.js compatible way
-      try {
-        // Check if we can access response.body as a Node.js stream
-        if (typeof response.body.pipe === 'function') {
-          // It's a Node.js Readable stream
-          response.body.pipe(res);
-          
-          // Log success
-          logger.debug({
-            type: 'stream-proxy',
-            url,
-            method: 'pipe',
-            contentType: contentType || 'unknown'
-          }, 'Streaming response using pipe');
-          
-          // Set up event handlers
-          response.body.on('end', () => {
-            recordResponse(requestStartTime, true, 0, responseSize);
+      // For video/audio content, stream directly without buffering
+      const isMediaContent = contentType && (
+        contentType.startsWith('video/') || 
+        contentType.startsWith('audio/') ||
+        contentType.includes('octet-stream')
+      );
+      
+      // Also check by file extension for media files
+      const mediaExtensions = ['.mp4', '.webm', '.mkv', '.avi', '.mov', '.ts', '.mp3', '.m4a', '.flac', '.wav'];
+      const isMediaByExtension = mediaExtensions.some(ext => url.toLowerCase().includes(ext));
+      
+      if (isMediaContent || isMediaByExtension) {
+        // Stream media directly using pipe for better performance
+        try {
+          if (typeof response.body.pipe === 'function') {
+            response.body.pipe(res);
+            
             logger.debug({
               type: 'stream-proxy',
               url,
               method: 'pipe',
-              bytesTransferred: responseSize
-            }, 'Stream completed');
-          });
-          
-          response.body.on('error', (err) => {
-            recordResponse(requestStartTime, false, 0, responseSize);
-            logger.error({
-              type: 'stream-proxy',
-              url,
-              method: 'pipe',
-              error: err instanceof Error ? err.message : String(err)
-            }, 'Stream error');
+              contentType: contentType || 'unknown'
+            }, 'Streaming media response using pipe');
             
-            // Only end response if it hasn't been sent yet
-            if (!res.headersSent) {
-              res.status(500).end();
-            } else if (!res.writableEnded) {
-              res.end();
-            }
-          });
-          
-          // This prevents the function from continuing, as response is now handled by pipe
-          return;
-        } else {
-          // For newer fetch implementations with Web API ReadableStream
-          // Use arrayBuffer as fallback since we can't directly pipe
-          logger.debug({
+            response.body.on('end', () => {
+              recordResponse(requestStartTime, true, 0, responseSize);
+            });
+            
+            response.body.on('error', (err) => {
+              recordResponse(requestStartTime, false, 0, responseSize);
+              logger.error({
+                type: 'stream-proxy',
+                url,
+                error: err instanceof Error ? err.message : String(err)
+              }, 'Stream error');
+              
+              if (!res.headersSent) {
+                res.status(500).end();
+              } else if (!res.writableEnded) {
+                res.end();
+              }
+            });
+            
+            return;
+          } else {
+            // Fallback for Web API ReadableStream
+            const buffer = await response.arrayBuffer();
+            recordResponse(requestStartTime, true, 0, buffer.byteLength);
+            return res.send(Buffer.from(buffer));
+          }
+        } catch (error) {
+          logger.warn({
             type: 'stream-proxy',
             url,
-            method: 'buffer',
-            reason: 'readable-stream-not-available'
-          }, 'Falling back to buffer approach');
-          
-          const buffer = await response.arrayBuffer();
-          recordResponse(requestStartTime, true, 0, buffer.byteLength);
-          return res.send(Buffer.from(buffer));
-        }
-      } catch (error) {
-        // If stream handling fails, fall back to buffer approach
-        logger.warn({
-          type: 'stream-proxy',
-          url,
-          error: error instanceof Error ? error.message : String(error),
-          fallback: 'using-buffer'
-        }, 'Stream handling failed, using buffer fallback');
-        
-        try {
-          const buffer = await response.arrayBuffer();
-          recordResponse(requestStartTime, true, 0, buffer.byteLength);
-          return res.send(Buffer.from(buffer));
-        } catch (err) {
-          recordResponse(requestStartTime, false, 0, 0);
-          logger.error({
-            type: 'stream-proxy',
-            url,
-            error: err instanceof Error ? err.message : String(err)
-          }, 'Buffer fallback failed');
+            error: error instanceof Error ? error.message : String(error)
+          }, 'Media streaming failed');
           
           if (!res.headersSent) {
             return res.status(500).json({
-              error: {
-                code: 500,
-                message: 'Failed to process content',
-                url
-              },
+              error: { code: 500, message: 'Failed to stream content', url },
               success: false,
               timestamp: new Date().toISOString()
             });
-          } else if (!res.writableEnded) {
-            return res.end();
           }
+        }
+      }
+      
+      // For non-media content, buffer and check for compression by magic bytes
+      try {
+        const arrayBuffer = await response.arrayBuffer();
+        const buffer = Buffer.from(arrayBuffer);
+        
+        // Check for compression magic bytes even if content-encoding header is missing
+        // GZIP: 0x1F 0x8B
+        // ZSTD: 0x28 0xB5 0x2F 0xFD
+        const isLikelyCompressed = buffer.length > 2 && (
+          (buffer[0] === 0x1F && buffer[1] === 0x8B) || // gzip
+          (buffer.length > 4 && buffer[0] === 0x28 && buffer[1] === 0xB5 && buffer[2] === 0x2F && buffer[3] === 0xFD) // zstd
+        );
+        
+        // If compression detected by magic bytes or header, decompress
+        if (isLikelyCompressed || contentEncoding) {
+          logger.debug({
+            type: 'stream-proxy',
+            url,
+            detectedBy: isLikelyCompressed ? 'magic-bytes' : 'content-encoding-header',
+            encoding: contentEncoding || 'auto-detected'
+          }, 'Compression detected, decompressing content');
+          
+          const decompressed = await decompressWithWorker(buffer, contentEncoding);
+          res.removeHeader('content-encoding');
+          recordResponse(requestStartTime, true, buffer.length, decompressed.length);
+          return res.send(decompressed);
+        }
+        
+        // No compression detected, send as-is
+        recordResponse(requestStartTime, true, 0, buffer.length);
+        return res.send(buffer);
+      } catch (error) {
+        recordResponse(requestStartTime, false, 0, 0);
+        logger.error({
+          type: 'stream-proxy',
+          url,
+          error: error instanceof Error ? error.message : String(error)
+        }, 'Failed to process content');
+        
+        if (!res.headersSent) {
+          return res.status(500).json({
+            error: {
+              code: 500,
+              message: 'Failed to process content',
+              url
+            },
+            success: false,
+            timestamp: new Date().toISOString()
+          });
+        } else if (!res.writableEnded) {
+          return res.end();
         }
       }
     }

@@ -37,6 +37,25 @@ export const domainTemplates: DomainTemplate[] = [
     }
   },
 
+  // myspacecat.pictures
+  {
+    pattern: /myspacecat\.pictures$/i,
+    headers: {
+      'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'accept': '*/*',
+      'accept-language': 'en-US,en;q=0.5',
+      'sec-fetch-dest': 'empty',
+      'sec-fetch-mode': 'cors',
+      'sec-fetch-site': 'cross-site',
+    },
+    headersFn: (url: URL) => {
+      return {
+        'origin': 'https://oppai.stream',
+        'referer': 'https://oppai.stream/',
+      };
+    }
+  },
+
   // Padorupado.ru
      
    {
