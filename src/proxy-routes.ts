@@ -119,6 +119,7 @@ const validateUrlParam = (req: Request, res: Response, next: NextFunction) => {
 async function streamProxyRequest(req: Request, res: Response, url: string, headers: Record<string, string>) {
   const requestStartTime = recordRequest();
   let responseSize = 0;
+  const targetHost = new URL(url).host;
   
   // Track response size for streams
   const originalWrite = res.write;
@@ -135,11 +136,36 @@ async function streamProxyRequest(req: Request, res: Response, url: string, head
   
   try {
     // Perform the fetch request
-    const response = await fetch(url, {
+    let response = await fetch(url, {
       method: req.method,
       headers,
       signal: abortController.signal,
     });
+
+    // Some CDNs reject forwarded browser/client headers from proxy servers.
+    // Retry once with minimal headers before returning the upstream 403.
+    if (response.status === 403 && req.method === 'GET') {
+      const fallbackHeaders: Record<string, string> = {
+        'user-agent': headers['user-agent'] || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:137.0) Gecko/20100101 Firefox/137.0',
+        'accept': '*/*',
+        'host': targetHost,
+      };
+
+      if (req.headers.range) {
+        fallbackHeaders['range'] = req.headers.range as string;
+      }
+
+      logger.warn({
+        type: 'stream-proxy',
+        url,
+      }, 'Received 403 from upstream, retrying once with minimal headers');
+
+      response = await fetch(url, {
+        method: req.method,
+        headers: fallbackHeaders,
+        signal: abortController.signal,
+      });
+    }
     
     clearTimeout(timeoutId);
     
