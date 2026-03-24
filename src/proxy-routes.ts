@@ -595,6 +595,8 @@ async function proxyRequest(req: Request, res: Response, next: NextFunction) {
       'host',
       'connection',
       'content-length',
+      'origin',
+      'referer',
       'forwarded',
       'x-forwarded-for',
       'x-forwarded-host',

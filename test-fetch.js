@@ -1,0 +1,1 @@
+import fetch from 'node-fetch'; const url = 'https://vault-99.owocdn.top/stream/99/02/894d27b3b2feb6b7ff7ae43965e6690ac2112d9cc358defd00a34c7b68e076b2/mon.key'; fetch(url, { headers: { 'user-agent': 'Mozilla/5.0', 'origin': 'https://kwik.cx', 'referer': 'https://kwik.cx/e/uEPQKLMzFpaz' } }).then(r = 
