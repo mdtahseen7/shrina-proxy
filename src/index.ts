@@ -1,8 +1,25 @@
 import http from 'http';
+import dns from 'dns';
 import 'dotenv/config';
 import app from './app.js';
 import { SERVER } from './config/constants.js';
 import { logger } from './middleware.js';
+
+// Prefer IPv4 first for outbound fetches.
+// Some CDNs/WAFs block specific IPv6 ranges used by cloud providers.
+if (process.env.PREFER_IPV4 !== 'false') {
+  try {
+    dns.setDefaultResultOrder('ipv4first');
+  } catch (error) {
+    logger.warn(
+      {
+        type: 'server',
+        error: error instanceof Error ? error.message : String(error),
+      },
+      'Failed to set DNS result order to ipv4first'
+    );
+  }
+}
 
 // Get port from environment
 const PORT = process.env.PORT || 3000;
