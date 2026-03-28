@@ -132,6 +132,42 @@ export const domainTemplates: DomainTemplate[] = [
   },
 
   {
+    pattern: /\.megaup\.nl/i,
+    headers: {
+      'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:137.0) Gecko/20100101 Firefox/137.0',
+      'accept': '*/*',
+      'accept-language': 'en-US,en;q=0.5',
+      'sec-fetch-dest': 'empty',
+      'sec-fetch-mode': 'cors',
+      'sec-fetch-site': 'cross-site',
+    },
+    headersFn: (url: URL) => {
+      return {
+        'origin': 'https://megaup.nl',
+        'referer': 'https://megaup.nl/',
+      };
+    }
+  },
+
+  {
+    pattern: /\.pro25zone\.site/i,
+    headers: {
+      'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:137.0) Gecko/20100101 Firefox/137.0',
+      'accept': '*/*',
+      'accept-language': 'en-US,en;q=0.5',
+      'sec-fetch-dest': 'empty',
+      'sec-fetch-mode': 'cors',
+      'sec-fetch-site': 'cross-site',
+    },
+    headersFn: (url: URL) => {
+      return {
+        'origin': 'https://megaup.nl',
+        'referer': 'https://megaup.nl/',
+      };
+    }
+  },
+
+  {
     pattern: /\.nebulax-89\.biz/i,
     headers: {
       'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:137.0) Gecko/20100101 Firefox/137.0',
