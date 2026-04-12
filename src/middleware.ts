@@ -6,17 +6,27 @@ import { SERVER, PROXY, LOGGING } from './config/constants.js';
 // ==================== LOGGER MIDDLEWARE ====================
 
 // Create a pino logger instance
-export const logger = pino.default({
-  level: LOGGING.LEVEL,
-  transport: {
-    target: 'pino-pretty',
-    options: {
-      colorize: true,
-      translateTime: 'SYS:standard',
-      ignore: 'pid,hostname',
-    },
-  },
-});
+const enablePrettyLogs = SERVER.IS_DEVELOPMENT || process.env.LOG_PRETTY === 'true';
+
+export const logger = pino.default(
+  enablePrettyLogs
+    ? {
+        level: LOGGING.LEVEL,
+        transport: {
+          target: 'pino-pretty',
+          options: {
+            colorize: true,
+            translateTime: 'SYS:standard',
+            ignore: 'pid,hostname',
+          },
+        },
+      }
+    : {
+        level: LOGGING.LEVEL,
+      }
+);
+
+const logSuccessfulResponses = process.env.LOG_SUCCESS_RESPONSES === 'true';
 
 /**
  * Request logger middleware for Express
@@ -70,7 +80,11 @@ export const requestLogger = (req: Request, res: Response, next: NextFunction) =
     } else if (res.statusCode >= 400) {
       logger.warn(logData, message);
     } else {
-      logger.info(logData, message);
+      if (logSuccessfulResponses) {
+        logger.info(logData, message);
+      } else {
+        logger.debug(logData, message);
+      }
     }
     
     // Call the original end method

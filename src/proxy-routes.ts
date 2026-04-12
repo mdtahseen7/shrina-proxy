@@ -1,6 +1,8 @@
 import express, { Request, Response, NextFunction, Router } from 'express';
 import fetch from 'node-fetch';
 import { URL } from 'url';
+import http from 'http';
+import https from 'https';
 import { PROXY, ROUTES, SERVER } from './config/constants.js';
 import { logger } from './middleware.js';
 import { generateHeadersForUrl } from './config/domain-templates.js';
@@ -31,6 +33,25 @@ import {
 } from './utils/performance-monitor.js';
 
 const router: Router = express.Router();
+
+// Reuse outbound TCP/TLS connections for faster segment delivery.
+const httpKeepAliveAgent = new http.Agent({
+  keepAlive: true,
+  maxSockets: 256,
+  maxFreeSockets: 64,
+  timeout: 60000,
+});
+
+const httpsKeepAliveAgent = new https.Agent({
+  keepAlive: true,
+  maxSockets: 256,
+  maxFreeSockets: 64,
+  timeout: 60000,
+});
+
+const keepAliveAgent = (parsedUrl: URL) => {
+  return parsedUrl.protocol === 'http:' ? httpKeepAliveAgent : httpsKeepAliveAgent;
+};
 
 // Extend Express Request type to include targetUrl
 declare global {
@@ -118,18 +139,7 @@ const validateUrlParam = (req: Request, res: Response, next: NextFunction) => {
  */
 async function streamProxyRequest(req: Request, res: Response, url: string, headers: Record<string, string>) {
   const requestStartTime = recordRequest();
-  let responseSize = 0;
   const targetHost = new URL(url).host;
-  
-  // Track response size for streams
-  const originalWrite = res.write;
-  // @ts-ignore
-  res.write = function(chunk) {
-    if (chunk) {
-      responseSize += chunk.length || 0;
-    }
-    return originalWrite.apply(res, arguments as any);
-  };
   
   const abortController = new AbortController();
   const timeoutId = setTimeout(() => abortController.abort(), PROXY.REQUEST_TIMEOUT);
@@ -139,6 +149,7 @@ async function streamProxyRequest(req: Request, res: Response, url: string, head
     let response = await fetch(url, {
       method: req.method,
       headers,
+      agent: keepAliveAgent,
       signal: abortController.signal,
     });
 
@@ -163,8 +174,31 @@ async function streamProxyRequest(req: Request, res: Response, url: string, head
       response = await fetch(url, {
         method: req.method,
         headers: fallbackHeaders,
+        agent: keepAliveAgent,
         signal: abortController.signal,
       });
+
+      // Some providers reject any non-essential headers from cloud-origin requests.
+      // Try one final ultra-minimal retry before surfacing the 403.
+      if (response.status === 403) {
+        const ultraMinimalHeaders: Record<string, string> = {};
+
+        if (req.headers.range) {
+          ultraMinimalHeaders['range'] = req.headers.range as string;
+        }
+
+        logger.warn({
+          type: 'stream-proxy',
+          url,
+        }, 'Second 403 from upstream, retrying once with ultra-minimal headers');
+
+        response = await fetch(url, {
+          method: req.method,
+          headers: ultraMinimalHeaders,
+          agent: keepAliveAgent,
+          signal: abortController.signal,
+        });
+      }
     }
     
     clearTimeout(timeoutId);
@@ -209,6 +243,7 @@ async function streamProxyRequest(req: Request, res: Response, url: string, head
     // Get content type and other headers
     const contentType = response.headers.get('content-type');
     const contentLength = response.headers.get('content-length');
+    const streamSize = contentLength ? parseInt(contentLength, 10) : 0;
     const contentEncoding = response.headers.get('content-encoding');
     const isCompressed = !!contentEncoding && 
                          ['gzip', 'br', 'deflate', 'zstd'].includes(contentEncoding.toLowerCase());
@@ -349,11 +384,11 @@ async function streamProxyRequest(req: Request, res: Response, url: string, head
             }, 'Streaming media response using pipe');
             
             response.body.on('end', () => {
-              recordResponse(requestStartTime, true, 0, responseSize);
+              recordResponse(requestStartTime, true, 0, streamSize);
             });
             
             response.body.on('error', (err) => {
-              recordResponse(requestStartTime, false, 0, responseSize);
+              recordResponse(requestStartTime, false, 0, streamSize);
               logger.error({
                 type: 'stream-proxy',
                 url,
@@ -687,6 +722,7 @@ async function proxyRequest(req: Request, res: Response, next: NextFunction) {
         method: req.method,
         headers,
         body,
+        agent: keepAliveAgent,
         redirect: 'follow',
         signal: abortController.signal,
       });
