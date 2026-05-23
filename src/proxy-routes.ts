@@ -665,7 +665,11 @@ async function proxyRequest(req: Request, res: Response, next: NextFunction) {
     ];
     
     for (const [key, value] of Object.entries(req.headers)) {
-      if (!excludeHeaders.includes(key.toLowerCase()) && value) {
+      if (
+        !excludeHeaders.includes(key.toLowerCase()) && 
+        !key.toLowerCase().startsWith('sec-ch-') &&
+        value
+      ) {
         headers[key] = Array.isArray(value) ? value.join(', ') : value;
       }
     }
